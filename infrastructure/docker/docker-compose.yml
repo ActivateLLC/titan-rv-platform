@@ -1,0 +1,200 @@
+version: '3.8'
+
+services:
+  #---------------------------------------------------------------
+  # ERPNext Services
+  #---------------------------------------------------------------
+  erpnext-db:
+    image: mariadb:10.6
+    container_name: erpnext-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${ERPNEXT_DB_ROOT_PASSWORD:-admin}
+      - MYSQL_DATABASE=${ERPNEXT_DB_NAME:-erpnext}
+      - MYSQL_USER=${ERPNEXT_DB_USER:-erpnext}
+      - MYSQL_PASSWORD=${ERPNEXT_DB_PASSWORD:-erpnext}
+    volumes:
+      - erpnext-db-data:/var/lib/mysql
+    networks:
+      - titan-network
+
+  erpnext-redis:
+    image: redis:6.2-alpine
+    container_name: erpnext-redis
+    restart: unless-stopped
+    volumes:
+      - erpnext-redis-data:/data
+    networks:
+      - titan-network
+
+  erpnext:
+    image: frappe/erpnext:v14
+    container_name: erpnext
+    restart: unless-stopped
+    depends_on:
+      - erpnext-db
+      - erpnext-redis
+    ports:
+      - "8000:8000"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${ERPNEXT_DB_ROOT_PASSWORD:-admin}
+      - ADMIN_PASSWORD=${ERPNEXT_ADMIN_PASSWORD:-admin}
+      - DB_HOST=erpnext-db
+      - REDIS_CACHE=redis://erpnext-redis:6379/0
+      - REDIS_QUEUE=redis://erpnext-redis:6379/1
+      - REDIS_SOCKETIO=redis://erpnext-redis:6379/2
+    volumes:
+      - erpnext-sites:/home/frappe/frappe-bench/sites
+    networks:
+      - titan-network
+
+  #---------------------------------------------------------------
+  # SuiteCRM Services
+  #---------------------------------------------------------------
+  suitecrm-db:
+    image: mysql:8.0
+    container_name: suitecrm-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=${SUITECRM_DB_ROOT_PASSWORD:-admin}
+      - MYSQL_DATABASE=${SUITECRM_DB_NAME:-suitecrm}
+      - MYSQL_USER=${SUITECRM_DB_USER:-suitecrm}
+      - MYSQL_PASSWORD=${SUITECRM_DB_PASSWORD:-suitecrm}
+    volumes:
+      - suitecrm-db-data:/var/lib/mysql
+    networks:
+      - titan-network
+
+  suitecrm:
+    image: bitnami/suitecrm:latest
+    container_name: suitecrm
+    restart: unless-stopped
+    depends_on:
+      - suitecrm-db
+    ports:
+      - "8001:8080"
+    environment:
+      - SUITECRM_DATABASE_HOST=suitecrm-db
+      - SUITECRM_DATABASE_PORT_NUMBER=3306
+      - SUITECRM_DATABASE_NAME=${SUITECRM_DB_NAME:-suitecrm}
+      - SUITECRM_DATABASE_USER=${SUITECRM_DB_USER:-suitecrm}
+      - SUITECRM_DATABASE_PASSWORD=${SUITECRM_DB_PASSWORD:-suitecrm}
+      - SUITECRM_USERNAME=${SUITECRM_ADMIN_USER:-admin}
+      - SUITECRM_PASSWORD=${SUITECRM_ADMIN_PASSWORD:-admin}
+      - SUITECRM_EMAIL=${SUITECRM_ADMIN_EMAIL:-admin@titan-rv.com}
+    volumes:
+      - suitecrm-data:/bitnami/suitecrm
+    networks:
+      - titan-network
+
+  #---------------------------------------------------------------
+  # OpenProject Services
+  #---------------------------------------------------------------
+  openproject-db:
+    image: postgres:13
+    container_name: openproject-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_PASSWORD=${OPENPROJECT_DB_PASSWORD:-openproject}
+      - POSTGRES_USER=${OPENPROJECT_DB_USER:-openproject}
+      - POSTGRES_DB=${OPENPROJECT_DB_NAME:-openproject}
+    volumes:
+      - openproject-db-data:/var/lib/postgresql/data
+    networks:
+      - titan-network
+
+  openproject:
+    image: openproject/community:12
+    container_name: openproject
+    restart: unless-stopped
+    depends_on:
+      - openproject-db
+    ports:
+      - "8002:80"
+    environment:
+      - DATABASE_URL=postgres://${OPENPROJECT_DB_USER:-openproject}:${OPENPROJECT_DB_PASSWORD:-openproject}@openproject-db:5432/${OPENPROJECT_DB_NAME:-openproject}
+      - SECRET_KEY_BASE=${OPENPROJECT_SECRET_KEY_BASE:-secret}
+    volumes:
+      - openproject-data:/var/openproject/assets
+    networks:
+      - titan-network
+
+  #---------------------------------------------------------------
+  # Spree Commerce (E-commerce)
+  #---------------------------------------------------------------
+  spree-db:
+    image: postgres:13
+    container_name: spree-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_PASSWORD=${SPREE_DB_PASSWORD:-spree}
+      - POSTGRES_USER=${SPREE_DB_USER:-spree}
+      - POSTGRES_DB=${SPREE_DB_NAME:-spree}
+    volumes:
+      - spree-db-data:/var/lib/postgresql/data
+    networks:
+      - titan-network
+
+  spree:
+    image: spreecommerce/spree:4.2
+    container_name: spree
+    restart: unless-stopped
+    depends_on:
+      - spree-db
+    ports:
+      - "8003:3000"
+    environment:
+      - DB_HOST=spree-db
+      - DB_PORT=5432
+      - DB_NAME=${SPREE_DB_NAME:-spree}
+      - DB_USERNAME=${SPREE_DB_USER:-spree}
+      - DB_PASSWORD=${SPREE_DB_PASSWORD:-spree}
+      - RAILS_ENV=development
+      - SECRET_KEY_BASE=${SPREE_SECRET_KEY_BASE:-secret}
+    volumes:
+      - spree-data:/app/public
+    networks:
+      - titan-network
+
+  #---------------------------------------------------------------
+  # API Gateway
+  #---------------------------------------------------------------
+  api-gateway:
+    image: nginx:alpine
+    container_name: api-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx:/etc/nginx/conf.d
+      - ./ssl:/etc/ssl
+    depends_on:
+      - erpnext
+      - suitecrm
+      - openproject
+      - spree
+    networks:
+      - titan-network
+
+networks:
+  titan-network:
+    driver: bridge
+
+volumes:
+  # ERPNext volumes
+  erpnext-db-data:
+  erpnext-redis-data:
+  erpnext-sites:
+  
+  # SuiteCRM volumes
+  suitecrm-db-data:
+  suitecrm-data:
+  
+  # OpenProject volumes
+  openproject-db-data:
+  openproject-data:
+  
+  # Spree volumes
+  spree-db-data:
+  spree-data:
